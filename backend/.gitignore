@@ -1,1 +1,24 @@
+# Environment
+.env
+.env.local
+.env.*.local
 
+# Dependencies
+vendor/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime
+storage/
+cache/
+tmp/
