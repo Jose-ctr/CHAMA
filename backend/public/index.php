@@ -12,7 +12,9 @@ require_once dirname(__DIR__) . '/vendor/autoload.php';
 
 use Chama\Config\Bootstrap;
 use Chama\Http\Cors;
+use Chama\Http\Request;
 use Chama\Http\Response;
+use Chama\Http\Router;
 
 try {
     /*
@@ -33,15 +35,41 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Basic API response
+    | Request
     |--------------------------------------------------------------------------
     */
 
-    Response::success([
-        'app' => 'CHAMA',
-        'version' => 'v1',
-        'message' => 'CHAMA API is running.',
-    ]);
+    $request = new Request();
+
+    /*
+    |--------------------------------------------------------------------------
+    | Router
+    |--------------------------------------------------------------------------
+    */
+
+    $router = new Router();
+
+    /*
+    |--------------------------------------------------------------------------
+    | API Health
+    |--------------------------------------------------------------------------
+    */
+
+    $router->get('/', function (Request $request): never {
+        Response::success([
+            'app' => 'CHAMA',
+            'version' => 'v1',
+            'message' => 'CHAMA API is running.',
+        ]);
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Dispatch
+    |--------------------------------------------------------------------------
+    */
+
+    $router->dispatch($request);
 } catch (Throwable $e) {
     /*
     |--------------------------------------------------------------------------
