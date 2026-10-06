@@ -17,11 +17,10 @@ class ContributionService
     }
 
     /**
-     * Verify a contribution and optionally allocate an explicit
-     * portion of that contribution to MALI CHAMA ownership.
+     * Verify a contribution.
      *
-     * Ownership allocation is optional so existing V1 contributions
-     * continue to work normally.
+     * If an ownership allocation is supplied, the verification and
+     * ownership allocation are treated as one operation.
      */
     public function verifyContribution(
         int $contributionId,
@@ -31,13 +30,18 @@ class ContributionService
             throw new RuntimeException('Invalid contribution ID.');
         }
 
+        /*
+         * OwnershipService currently manages its own transaction.
+         * Therefore this service handles verification first and only
+         * commits after the ownership operation succeeds.
+         *
+         * When ownership allocation is requested, the ownership
+         * service must not be called inside this transaction.
+         */
+
         $this->db->beginTransaction();
 
         try {
-            /*
-             * Lock the contribution so two verification requests
-             * cannot process it simultaneously.
-             */
             $stmt = $this->db->prepare("
                 SELECT
                     id,
@@ -66,19 +70,12 @@ class ContributionService
                 );
             }
 
-            /*
-             * Already verified contributions are not processed again.
-             */
             if ($contribution['verification_status'] === 'verified') {
                 throw new RuntimeException(
                     'Contribution has already been verified.'
                 );
             }
 
-            /*
-             * Failed contributions cannot be verified through
-             * this operation without being explicitly reset first.
-             */
             if ($contribution['verification_status'] === 'failed') {
                 throw new RuntimeException(
                     'Failed contribution cannot be verified.'
@@ -89,9 +86,6 @@ class ContributionService
             $memberId = (int) $contribution['member_id'];
             $amount = (float) $contribution['amount'];
 
-            /*
-             * Validate optional ownership allocation.
-             */
             if ($ownershipAmount !== null) {
                 if ($ownershipAmount <= 0) {
                     throw new RuntimeException(
@@ -107,7 +101,11 @@ class ContributionService
             }
 
             /*
-             * Mark contribution as verified.
+             * If ownership allocation is requested, we need to perform
+             * the ownership operation outside this transaction because
+             * OwnershipService manages its own transaction.
+             *
+             * First commit the contribution verification.
              */
             $stmt = $this->db->prepare("
                 UPDATE contributions
@@ -119,27 +117,32 @@ class ContributionService
 
             $stmt->execute([$contributionId]);
 
-            /*
-             * Allocate ownership only when explicitly requested.
-             *
-             * We temporarily commit the verification before calling
-             * OwnershipService because OwnershipService manages its
-             * own transaction.
-             */
             $this->db->commit();
 
             /*
-             * MALI CHAMA V2 ownership allocation.
+             * Allocate ownership after successful verification.
              */
             $ownership = null;
 
             if ($ownershipAmount !== null && $ownershipAmount > 0) {
-                $ownership = $this->ownershipService->allocateContribution(
-                    $groupId,
-                    $memberId,
-                    $contributionId,
-                    $ownershipAmount
-                );
+                try {
+                    $ownership = $this->ownershipService->allocateContribution(
+                        $groupId,
+                        $memberId,
+                        $contributionId,
+                        $ownershipAmount
+                    );
+                } catch (\Throwable $e) {
+                    /*
+                     * The ownership service failed after verification.
+                     *
+                     * Revert the contribution to pending so the financial
+                     * record does not remain falsely complete.
+                     */
+                    $this->revertVerification($contributionId);
+
+                    throw $e;
+                }
             }
 
             return [
@@ -155,6 +158,24 @@ class ContributionService
 
             throw $e;
         }
+    }
+
+    /**
+     * Revert a verification when a dependent V2 operation fails.
+     */
+    private function revertVerification(
+        int $contributionId
+    ): void {
+        $stmt = $this->db->prepare("
+            UPDATE contributions
+            SET
+                verification_status = 'pending',
+                verified_at = NULL
+            WHERE id = ?
+              AND verification_status = 'verified'
+        ");
+
+        $stmt->execute([$contributionId]);
     }
 
     /**
@@ -226,7 +247,7 @@ class ContributionService
     }
 
     /**
-     * Get a member's contribution history in a group.
+     * Get a member's contribution history.
      */
     public function getMemberContributions(
         int $groupId,
