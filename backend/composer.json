@@ -10,7 +10,8 @@
     },
     "autoload": {
         "psr-4": {
-            "Chama\\": "src/"
+            "Chama\\": "src/",
+            "App\\": "src/"
         }
     },
     "scripts": {
