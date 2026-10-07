@@ -117,4 +117,56 @@ final class AssetService
 
         return $asset;
     }
+    public function updateAsset(
+        int $assetId,
+        string $name,
+        string $type,
+        float $purchasePrice,
+        float $currentValue,
+        ?string $description = null,
+        ?string $purchaseDate = null
+    ): array {
+        $name = trim($name);
+        $type = trim($type);
+
+        if ($name === "") {
+            throw new RuntimeException("Asset name is required.");
+        }
+
+        if ($purchasePrice < 0 || $currentValue < 0) {
+            throw new RuntimeException("Asset values cannot be negative.");
+        }
+
+        $stmt = $this->db->prepare(
+            "UPDATE assets
+             SET name = :name,
+                 type = :type,
+                 purchase_price = :purchase_price,
+                 current_value = :current_value,
+                 description = :description,
+                 purchase_date = COALESCE(:purchase_date, purchase_date),
+                 updated_at = NOW()
+             WHERE id = :id
+             RETURNING *"
+        );
+
+        $stmt->execute([
+            "id" => $assetId,
+            "name" => $name,
+            "type" => $type,
+            "purchase_price" => $purchasePrice,
+            "current_value" => $currentValue,
+            "description" => $description,
+            "purchase_date" => $purchaseDate,
+        ]);
+
+        $asset = $stmt->fetch();
+
+        if ($asset === false) {
+            throw new RuntimeException("Asset not found.");
+        }
+
+        return $asset;
+    }
+
 }
