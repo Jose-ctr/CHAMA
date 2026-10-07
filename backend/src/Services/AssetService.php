@@ -169,4 +169,27 @@ final class AssetService
         return $asset;
     }
 
+    public function recordValuation(int $assetId, float $newValue, ?string $reason = null): array {
+        if ($newValue < 0) throw new RuntimeException("Asset value cannot be negative.");
+        $this->db->beginTransaction();
+        try {
+            $stmt=$this->db->prepare("SELECT current_value FROM assets WHERE id = :id FOR UPDATE");
+            $stmt->execute(["id"=>$assetId]);
+            $asset=$stmt->fetch();
+            if ($asset===false) throw new RuntimeException("Asset not found.");
+            $oldValue=(float)$asset["current_value"];
+            $update=$this->db->prepare("UPDATE assets SET current_value = :new_value, updated_at = NOW() WHERE id = :id");
+            $update->execute(["id"=>$assetId,"new_value"=>$newValue]);
+            $history=$this->db->prepare("INSERT INTO asset_valuations (asset_id, old_value, new_value, reason) VALUES (:asset_id, :old_value, :new_value, :reason) RETURNING *");
+            $history->execute(["asset_id"=>$assetId,"old_value"=>$oldValue,"new_value"=>$newValue,"reason"=>$reason]);
+            $valuation=$history->fetch();
+            if ($valuation===false) throw new RuntimeException("Failed to record valuation.");
+            $this->db->commit();
+            return $valuation;
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) $this->db->rollBack();
+            throw $e;
+        }
+    }
+
 }
