@@ -14,7 +14,7 @@ final class AssetService
 
     public function __construct(?PDO $db = null)
     {
-        $this->db = $db ?? Database::connection();
+        $this->db = $db ?? Database::connect();
     }
 
     public function getGroupAssets(int $groupId): array
