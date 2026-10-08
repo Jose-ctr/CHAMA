@@ -139,6 +139,29 @@ try {
 
     /*
     |--------------------------------------------------------------------------
+    | Asset - Get Single Asset
+    |--------------------------------------------------------------------------
+    */
+
+    $router->get('/api/asset', function (Request $request): never {
+        $assetId = (int) $request->query('id', 0);
+
+        if ($assetId <= 0) {
+            Response::error(
+                'A valid asset id is required.',
+                422
+            );
+        }
+
+        $service = new AssetService();
+
+        Response::success(
+            $service->getAsset($assetId)
+        );
+    });
+
+    /*
+    |--------------------------------------------------------------------------
     | Dispatch
     |--------------------------------------------------------------------------
     */
