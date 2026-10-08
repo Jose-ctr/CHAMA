@@ -162,6 +162,86 @@ try {
 
     /*
     |--------------------------------------------------------------------------
+    | Asset - Update Asset
+    |--------------------------------------------------------------------------
+    */
+
+    $router->put('/api/asset', function (Request $request): never {
+        $assetId = (int) $request->query('id', 0);
+
+        if ($assetId <= 0) {
+            Response::error(
+                'A valid asset id is required.',
+                422
+            );
+        }
+
+        $data = $request->all();
+
+        $name = array_key_exists('name', $data)
+            ? trim((string) $data['name'])
+            : null;
+
+        $description = array_key_exists('description', $data)
+            ? trim((string) $data['description'])
+            : null;
+
+        $purchaseValue = array_key_exists('purchase_value', $data)
+            ? (float) $data['purchase_value']
+            : null;
+
+        $currentValue = array_key_exists('current_value', $data)
+            ? (float) $data['current_value']
+            : null;
+
+        if ($name !== null && $name === '') {
+            Response::error(
+                'Asset name cannot be empty.',
+                422
+            );
+        }
+
+        if ($purchaseValue !== null && $purchaseValue < 0) {
+            Response::error(
+                'Purchase value cannot be negative.',
+                422
+            );
+        }
+
+        if ($currentValue !== null && $currentValue < 0) {
+            Response::error(
+                'Current value cannot be negative.',
+                422
+            );
+        }
+
+        if (
+            $name === null &&
+            $description === null &&
+            $purchaseValue === null &&
+            $currentValue === null
+        ) {
+            Response::error(
+                'At least one asset field is required.',
+                422
+            );
+        }
+
+        $service = new AssetService();
+
+        Response::success(
+            $service->updateAsset(
+                $assetId,
+                $name,
+                $description,
+                $purchaseValue,
+                $currentValue
+            )
+        );
+    });
+
+    /*
+    |--------------------------------------------------------------------------
     | Dispatch
     |--------------------------------------------------------------------------
     */
