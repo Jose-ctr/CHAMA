@@ -15,6 +15,7 @@ use Chama\Http\Cors;
 use Chama\Http\Request;
 use Chama\Http\Response;
 use Chama\Http\Router;
+use App\Services\AssetService;
 
 try {
     /*
@@ -61,6 +62,29 @@ try {
             'version' => 'v1',
             'message' => 'CHAMA API is running.',
         ]);
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Assets
+    |--------------------------------------------------------------------------
+    */
+
+    $router->get('/api/assets', function (Request $request): never {
+        $groupId = (int) $request->query('group_id', 0);
+
+        if ($groupId <= 0) {
+            Response::error(
+                'A valid group_id is required.',
+                422
+            );
+        }
+
+        $service = new AssetService();
+
+        Response::success(
+            $service->getGroupAssets($groupId)
+        );
     });
 
     /*
