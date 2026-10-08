@@ -2,320 +2,528 @@
 
 declare(strict_types=1);
 
-/*
-|--------------------------------------------------------------------------
-| CHAMA API Entry Point
-|--------------------------------------------------------------------------
-*/
-
-require_once dirname(__DIR__) . '/vendor/autoload.php';
-
 use Chama\Config\Bootstrap;
+use Chama\Config\Database;
 use Chama\Http\Cors;
 use Chama\Http\Request;
 use Chama\Http\Response;
 use Chama\Http\Router;
 use App\Services\AssetService;
+use App\Services\OwnershipService;
 
-try {
-    /*
-    |--------------------------------------------------------------------------
-    | Load application configuration
-    |--------------------------------------------------------------------------
-    */
+require dirname(__DIR__) . '/vendor/autoload.php';
 
-    Bootstrap::load();
+Bootstrap::init();
 
-    /*
-    |--------------------------------------------------------------------------
-    | CORS
-    |--------------------------------------------------------------------------
-    */
+Cors::handle();
 
-    Cors::handle();
+$router = new Router();
 
-    /*
-    |--------------------------------------------------------------------------
-    | Request
-    |--------------------------------------------------------------------------
-    */
+/*
+|--------------------------------------------------------------------------
+| Service factories
+|--------------------------------------------------------------------------
+*/
 
-    $request = new Request();
+$assetService = static function (): AssetService {
+    return new AssetService();
+};
 
-    /*
-    |--------------------------------------------------------------------------
-    | Router
-    |--------------------------------------------------------------------------
-    */
+$ownershipService = static function (): OwnershipService {
+    return new OwnershipService(Database::connect());
+};
 
-    $router = new Router();
+/*
+|--------------------------------------------------------------------------
+| Health check
+|--------------------------------------------------------------------------
+*/
 
-    /*
-    |--------------------------------------------------------------------------
-    | API Health
-    |--------------------------------------------------------------------------
-    */
+$router->get('/', static function (): never {
+    Response::success([
+        'application' => 'CHAMA API',
+        'version' => '2.0.0',
+        'status' => 'running',
+    ]);
+});
 
-    $router->get('/', function (Request $request): never {
+/*
+|--------------------------------------------------------------------------
+| Asset endpoints
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * GET /api/assets?group_id=1
+ *
+ * Retrieve all assets belonging to a group.
+ */
+$router->get('/api/assets', static function (Request $request) use ($assetService): never {
+    $groupId = (int) $request->query('group_id');
+
+    if ($groupId <= 0) {
+        Response::error('A valid group_id is required.', 422);
+    }
+
+    $assets = $assetService()->getGroupAssets($groupId);
+
+    Response::success([
+        'group_id' => $groupId,
+        'assets' => $assets,
+    ]);
+});
+
+/**
+ * POST /api/assets
+ *
+ * Create a group asset.
+ */
+$router->post('/api/assets', static function (Request $request) use ($assetService): never {
+    $data = $request->all();
+
+    $groupId = (int) ($data['group_id'] ?? 0);
+    $name = trim((string) ($data['name'] ?? ''));
+    $type = trim((string) ($data['type'] ?? ''));
+    $purchasePrice = $data['purchase_price'] ?? null;
+    $description = isset($data['description'])
+        ? trim((string) $data['description'])
+        : null;
+
+    if ($groupId <= 0) {
+        Response::error('A valid group_id is required.', 422);
+    }
+
+    if ($name === '') {
+        Response::error('Asset name is required.', 422);
+    }
+
+    if ($type === '') {
+        Response::error('Asset type is required.', 422);
+    }
+
+    if (
+        $purchasePrice !== null
+        && (!is_numeric($purchasePrice)
+            || !is_finite((float) $purchasePrice)
+            || (float) $purchasePrice < 0)
+    ) {
+        Response::error('purchase_price must be a valid non-negative number.', 422);
+    }
+
+    $asset = $assetService()->createAsset(
+        $groupId,
+        $type,
+        $name,
+        (float) ($purchasePrice ?? 0),
+        $description
+    );
+
+    Response::success([
+        'asset' => $asset,
+    ], 201);
+});
+
+/**
+ * GET /api/asset?id=1
+ *
+ * Retrieve a single asset.
+ */
+$router->get('/api/asset', static function (Request $request) use ($assetService): never {
+    $assetId = (int) $request->query('id');
+
+    if ($assetId <= 0) {
+        Response::error('A valid asset id is required.', 422);
+    }
+
+    $asset = $assetService()->getAsset($assetId);
+
+    Response::success([
+        'asset' => $asset,
+    ]);
+});
+
+/**
+ * PUT /api/asset?id=1
+ *
+ * Update an existing asset.
+ */
+$router->put('/api/asset', static function (Request $request) use ($assetService): never {
+    $assetId = (int) $request->query('id');
+    $data = $request->all();
+
+    if ($assetId <= 0) {
+        Response::error('A valid asset id is required.', 422);
+    }
+
+    $name = isset($data['name'])
+        ? trim((string) $data['name'])
+        : null;
+
+    $type = isset($data['type'])
+        ? trim((string) $data['type'])
+        : null;
+
+    $description = array_key_exists('description', $data)
+        ? ($data['description'] === null
+            ? null
+            : trim((string) $data['description']))
+        : null;
+
+    $purchasePrice = $data['purchase_price'] ?? null;
+
+    if ($name === '' || $type === '') {
+        Response::error('Asset name and type cannot be empty.', 422);
+    }
+
+    if (
+        $purchasePrice !== null
+        && (!is_numeric($purchasePrice)
+            || !is_finite((float) $purchasePrice)
+            || (float) $purchasePrice < 0)
+    ) {
+        Response::error('purchase_price must be a valid non-negative number.', 422);
+    }
+
+    $asset = $assetService()->updateAsset(
+        $assetId,
+        $name,
+        $type,
+        $purchasePrice !== null ? (float) $purchasePrice : null,
+        $description
+    );
+
+    Response::success([
+        'asset' => $asset,
+    ]);
+});
+
+/**
+ * POST /api/asset/valuation?id=1
+ *
+ * Record a new asset valuation.
+ */
+$router->post('/api/asset/valuation', static function (Request $request) use ($assetService): never {
+    $assetId = (int) $request->query('id');
+    $data = $request->all();
+
+    if ($assetId <= 0) {
+        Response::error('A valid asset id is required.', 422);
+    }
+
+    $newValue = $data['new_value'] ?? null;
+
+    if (
+        !is_numeric($newValue)
+        || !is_finite((float) $newValue)
+        || (float) $newValue < 0
+    ) {
+        Response::error('A valid non-negative new_value is required.', 422);
+    }
+
+    $reason = isset($data['reason'])
+        ? trim((string) $data['reason'])
+        : null;
+
+    $valuation = $assetService()->recordValuation(
+        $assetId,
+        (float) $newValue,
+        $reason
+    );
+
+    Response::success([
+        'valuation' => $valuation,
+    ], 201);
+});
+
+/*
+|--------------------------------------------------------------------------
+| Ownership endpoints
+|--------------------------------------------------------------------------
+*/
+
+/**
+ * GET /api/ownership/savings-asset?group_id=1
+ *
+ * Retrieve or create the group's savings reserve asset.
+ */
+$router->get(
+    '/api/ownership/savings-asset',
+    static function (Request $request) use ($ownershipService): never {
+        $groupId = (int) $request->query('group_id');
+
+        if ($groupId <= 0) {
+            Response::error('A valid group_id is required.', 422);
+        }
+
+        $asset = $ownershipService()->getSavingsAsset($groupId);
+
         Response::success([
-            'app' => 'CHAMA',
-            'version' => 'v1',
-            'message' => 'CHAMA API is running.',
+            'group_id' => $groupId,
+            'asset' => $asset,
         ]);
-    });
+    }
+);
 
-    /*
-    |--------------------------------------------------------------------------
-    | Assets - List Group Assets
-    |--------------------------------------------------------------------------
-    */
-
-    $router->get('/api/assets', function (Request $request): never {
-        $groupId = (int) $request->query('group_id', 0);
-
-        if ($groupId <= 0) {
-            Response::error(
-                'A valid group_id is required.',
-                422
-            );
-        }
-
-        $service = new AssetService();
-
-        Response::success(
-            $service->getGroupAssets($groupId)
-        );
-    });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Assets - Create Asset
-    |--------------------------------------------------------------------------
-    */
-
-    $router->post('/api/assets', function (Request $request): never {
-        $data = $request->all();
-
-        $groupId = (int) ($data['group_id'] ?? 0);
-        $name = trim((string) ($data['name'] ?? ''));
-        $description = isset($data['description'])
-            ? trim((string) $data['description'])
-            : null;
-        $purchaseValue = (float) ($data['purchase_value'] ?? 0);
-
-        if ($groupId <= 0) {
-            Response::error(
-                'A valid group_id is required.',
-                422
-            );
-        }
-
-        if ($name === '') {
-            Response::error(
-                'Asset name is required.',
-                422
-            );
-        }
-
-        if ($purchaseValue < 0) {
-            Response::error(
-                'Purchase value cannot be negative.',
-                422
-            );
-        }
-
-        $service = new AssetService();
-
-        Response::success(
-            $service->createAsset(
-                $groupId,
-                $name,
-                $description,
-                $purchaseValue
-            ),
-            201
-        );
-    });
-
-    /*
-    |--------------------------------------------------------------------------
-    | Asset - Get Single Asset
-    |--------------------------------------------------------------------------
-    */
-
-    $router->get('/api/asset', function (Request $request): never {
-        $assetId = (int) $request->query('id', 0);
+/**
+ * GET /api/ownership/units?asset_id=1
+ *
+ * Retrieve the total ownership units for an asset.
+ */
+$router->get(
+    '/api/ownership/units',
+    static function (Request $request) use ($ownershipService): never {
+        $assetId = (int) $request->query('asset_id');
 
         if ($assetId <= 0) {
-            Response::error(
-                'A valid asset id is required.',
-                422
-            );
+            Response::error('A valid asset_id is required.', 422);
         }
 
-        $service = new AssetService();
+        $totalUnits = $ownershipService()->getTotalUnits($assetId);
 
-        Response::success(
-            $service->getAsset($assetId)
-        );
-    });
+        Response::success([
+            'asset_id' => $assetId,
+            'total_units' => $totalUnits,
+        ]);
+    }
+);
 
-    /*
-    |--------------------------------------------------------------------------
-    | Asset - Update Asset
-    |--------------------------------------------------------------------------
-    */
-
-    $router->put('/api/asset', function (Request $request): never {
-        $assetId = (int) $request->query('id', 0);
+/**
+ * GET /api/ownership/unit-price?asset_id=1
+ *
+ * Retrieve the current price per ownership unit.
+ */
+$router->get(
+    '/api/ownership/unit-price',
+    static function (Request $request) use ($ownershipService): never {
+        $assetId = (int) $request->query('asset_id');
 
         if ($assetId <= 0) {
-            Response::error(
-                'A valid asset id is required.',
-                422
-            );
+            Response::error('A valid asset_id is required.', 422);
         }
 
+        $unitPrice = $ownershipService()->getUnitPrice($assetId);
+
+        Response::success([
+            'asset_id' => $assetId,
+            'unit_price' => $unitPrice,
+        ]);
+    }
+);
+
+/**
+ * POST /api/ownership/allocate
+ *
+ * Allocate verified contribution funds into ownership units.
+ *
+ * JSON body:
+ * {
+ *   "group_id": 1,
+ *   "member_id": 1,
+ *   "contribution_id": 1,
+ *   "ownership_amount": 500
+ * }
+ */
+$router->post(
+    '/api/ownership/allocate',
+    static function (Request $request) use ($ownershipService): never {
         $data = $request->all();
 
-        $name = array_key_exists('name', $data)
-            ? trim((string) $data['name'])
-            : null;
+        $groupId = filter_var(
+            $data['group_id'] ?? null,
+            FILTER_VALIDATE_INT
+        );
 
-        $description = array_key_exists('description', $data)
-            ? trim((string) $data['description'])
-            : null;
+        $memberId = filter_var(
+            $data['member_id'] ?? null,
+            FILTER_VALIDATE_INT
+        );
 
-        $purchaseValue = array_key_exists('purchase_value', $data)
-            ? (float) $data['purchase_value']
-            : null;
+        $contributionId = filter_var(
+            $data['contribution_id'] ?? null,
+            FILTER_VALIDATE_INT
+        );
 
-        $currentValue = array_key_exists('current_value', $data)
-            ? (float) $data['current_value']
-            : null;
+        $ownershipAmount = $data['ownership_amount'] ?? null;
 
-        if ($name !== null && $name === '') {
-            Response::error(
-                'Asset name cannot be empty.',
-                422
-            );
+        if ($groupId === false || $groupId === null || $groupId <= 0) {
+            Response::error('A valid group_id is required.', 422);
         }
 
-        if ($purchaseValue !== null && $purchaseValue < 0) {
-            Response::error(
-                'Purchase value cannot be negative.',
-                422
-            );
-        }
-
-        if ($currentValue !== null && $currentValue < 0) {
-            Response::error(
-                'Current value cannot be negative.',
-                422
-            );
+        if ($memberId === false || $memberId === null || $memberId <= 0) {
+            Response::error('A valid member_id is required.', 422);
         }
 
         if (
-            $name === null &&
-            $description === null &&
-            $purchaseValue === null &&
-            $currentValue === null
+            $contributionId === false
+            || $contributionId === null
+            || $contributionId <= 0
+        ) {
+            Response::error('A valid contribution_id is required.', 422);
+        }
+
+        if (
+            !is_numeric($ownershipAmount)
+            || !is_finite((float) $ownershipAmount)
+            || (float) $ownershipAmount <= 0
         ) {
             Response::error(
-                'At least one asset field is required.',
+                'ownership_amount must be a positive number.',
                 422
             );
         }
 
-        $service = new AssetService();
-
-        Response::success(
-            $service->updateAsset(
-                $assetId,
-                $name,
-                $description,
-                $purchaseValue,
-                $currentValue
-            )
+        $allocation = $ownershipService()->allocateContribution(
+            $groupId,
+            $memberId,
+            $contributionId,
+            (float) $ownershipAmount
         );
-    });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Asset - Record Valuation
-    |--------------------------------------------------------------------------
-    */
+        Response::success([
+            'allocation' => $allocation,
+        ], 201);
+    }
+);
 
-    $router->post('/api/asset/valuation', function (Request $request): never {
-        $assetId = (int) $request->query('id', 0);
+/**
+ * GET /api/ownership/member-units?group_id=1&member_id=1
+ *
+ * Retrieve a member's ownership units in a group.
+ */
+$router->get(
+    '/api/ownership/member-units',
+    static function (Request $request) use ($ownershipService): never {
+        $groupId = (int) $request->query('group_id');
+        $memberId = (int) $request->query('member_id');
 
-        if ($assetId <= 0) {
+        if ($groupId <= 0 || $memberId <= 0) {
             Response::error(
-                'A valid asset id is required.',
+                'Valid group_id and member_id are required.',
                 422
             );
         }
 
-        $data = $request->all();
-
-        if (!array_key_exists('new_value', $data)) {
-            Response::error(
-                'New asset value is required.',
-                422
-            );
-        }
-
-        $newValue = (float) $data['new_value'];
-
-        if ($newValue < 0) {
-            Response::error(
-                'Asset value cannot be negative.',
-                422
-            );
-        }
-
-        $reason = isset($data['reason'])
-            ? trim((string) $data['reason'])
-            : null;
-
-        $service = new AssetService();
-
-        Response::success(
-            $service->recordValuation(
-                $assetId,
-                $newValue,
-                $reason
-            ),
-            201
+        $units = $ownershipService()->getMemberUnits(
+            $groupId,
+            $memberId
         );
-    });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Dispatch
-    |--------------------------------------------------------------------------
-    */
+        Response::success([
+            'group_id' => $groupId,
+            'member_id' => $memberId,
+            'member_units' => $units,
+        ]);
+    }
+);
 
-    $router->dispatch($request);
+/**
+ * GET /api/ownership/member-percentage?group_id=1&member_id=1
+ *
+ * Retrieve a member's ownership percentage.
+ */
+$router->get(
+    '/api/ownership/member-percentage',
+    static function (Request $request) use ($ownershipService): never {
+        $groupId = (int) $request->query('group_id');
+        $memberId = (int) $request->query('member_id');
+
+        if ($groupId <= 0 || $memberId <= 0) {
+            Response::error(
+                'Valid group_id and member_id are required.',
+                422
+            );
+        }
+
+        $percentage = $ownershipService()->getMemberOwnershipPercentage(
+            $groupId,
+            $memberId
+        );
+
+        Response::success([
+            'group_id' => $groupId,
+            'member_id' => $memberId,
+            'member_ownership_percentage' => $percentage,
+        ]);
+    }
+);
+
+/**
+ * GET /api/ownership/member-asset-value?asset_id=1&member_id=1
+ *
+ * Retrieve a member's value in a specific asset.
+ */
+$router->get(
+    '/api/ownership/member-asset-value',
+    static function (Request $request) use ($ownershipService): never {
+        $assetId = (int) $request->query('asset_id');
+        $memberId = (int) $request->query('member_id');
+
+        if ($assetId <= 0 || $memberId <= 0) {
+            Response::error(
+                'Valid asset_id and member_id are required.',
+                422
+            );
+        }
+
+        $assetValue = $ownershipService()->getMemberAssetValue(
+            $assetId,
+            $memberId
+        );
+
+        Response::success([
+            'asset_id' => $assetId,
+            'member_id' => $memberId,
+            'member_asset_value' => $assetValue,
+        ]);
+    }
+);
+
+/**
+ * GET /api/ownership/member-summary?group_id=1&member_id=1
+ *
+ * Retrieve a member's ownership summary.
+ */
+$router->get(
+    '/api/ownership/member-summary',
+    static function (Request $request) use ($ownershipService): never {
+        $groupId = (int) $request->query('group_id');
+        $memberId = (int) $request->query('member_id');
+
+        if ($groupId <= 0 || $memberId <= 0) {
+            Response::error(
+                'Valid group_id and member_id are required.',
+                422
+            );
+        }
+
+        $summary = $ownershipService()->getMemberSummary(
+            $groupId,
+            $memberId
+        );
+
+        Response::success([
+            'summary' => $summary,
+        ]);
+    }
+);
+
+/*
+|--------------------------------------------------------------------------
+| Dispatch request
+|--------------------------------------------------------------------------
+*/
+
+try {
+    $router->dispatch();
 } catch (Throwable $e) {
-    /*
-    |--------------------------------------------------------------------------
-    | Error handling
-    |--------------------------------------------------------------------------
-    */
-
-    error_log($e->getMessage());
-
-    Response::error(
-        'An internal server error occurred.',
-        500
+    error_log(
+        sprintf(
+            '[CHAMA API] %s in %s:%d',
+            $e->getMessage(),
+            $e->getFile(),
+            $e->getLine()
+        )
     );
+
+    Response::error('An internal server error occurred.', 500);
 }
-
-Commit
-
-Use:
-
-feat: expose asset valuation API endpoint
-
-After you commit, send me the GitHub confirmation. Then we'll move to the next backend service rather than adding more routes to this file.
