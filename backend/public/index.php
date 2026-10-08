@@ -66,7 +66,7 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Assets
+    | Assets - List Group Assets
     |--------------------------------------------------------------------------
     */
 
@@ -84,6 +84,56 @@ try {
 
         Response::success(
             $service->getGroupAssets($groupId)
+        );
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Assets - Create Asset
+    |--------------------------------------------------------------------------
+    */
+
+    $router->post('/api/assets', function (Request $request): never {
+        $data = $request->all();
+
+        $groupId = (int) ($data['group_id'] ?? 0);
+        $name = trim((string) ($data['name'] ?? ''));
+        $description = isset($data['description'])
+            ? trim((string) $data['description'])
+            : null;
+        $purchaseValue = (float) ($data['purchase_value'] ?? 0);
+
+        if ($groupId <= 0) {
+            Response::error(
+                'A valid group_id is required.',
+                422
+            );
+        }
+
+        if ($name === '') {
+            Response::error(
+                'Asset name is required.',
+                422
+            );
+        }
+
+        if ($purchaseValue < 0) {
+            Response::error(
+                'Purchase value cannot be negative.',
+                422
+            );
+        }
+
+        $service = new AssetService();
+
+        Response::success(
+            $service->createAsset(
+                $groupId,
+                $name,
+                $description,
+                $purchaseValue
+            ),
+            201
         );
     });
 
