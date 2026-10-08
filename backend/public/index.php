@@ -242,6 +242,56 @@ try {
 
     /*
     |--------------------------------------------------------------------------
+    | Asset - Record Valuation
+    |--------------------------------------------------------------------------
+    */
+
+    $router->post('/api/asset/valuation', function (Request $request): never {
+        $assetId = (int) $request->query('id', 0);
+
+        if ($assetId <= 0) {
+            Response::error(
+                'A valid asset id is required.',
+                422
+            );
+        }
+
+        $data = $request->all();
+
+        if (!array_key_exists('new_value', $data)) {
+            Response::error(
+                'New asset value is required.',
+                422
+            );
+        }
+
+        $newValue = (float) $data['new_value'];
+
+        if ($newValue < 0) {
+            Response::error(
+                'Asset value cannot be negative.',
+                422
+            );
+        }
+
+        $reason = isset($data['reason'])
+            ? trim((string) $data['reason'])
+            : null;
+
+        $service = new AssetService();
+
+        Response::success(
+            $service->recordValuation(
+                $assetId,
+                $newValue,
+                $reason
+            ),
+            201
+        );
+    });
+
+    /*
+    |--------------------------------------------------------------------------
     | Dispatch
     |--------------------------------------------------------------------------
     */
@@ -261,3 +311,11 @@ try {
         500
     );
 }
+
+Commit
+
+Use:
+
+feat: expose asset valuation API endpoint
+
+After you commit, send me the GitHub confirmation. Then we'll move to the next backend service rather than adding more routes to this file.
