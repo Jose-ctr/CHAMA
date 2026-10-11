@@ -8,7 +8,6 @@
 --   2. Asset valuation history
 --   3. Ownership units
 --
--- Non-breaking migration from CHAMA V1
 -- PostgreSQL 14+
 -- ============================================================
 
@@ -16,34 +15,24 @@ BEGIN;
 
 -- ============================================================
 -- 1. ASSETS
--- What the Chama owns together
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS assets (
     id SERIAL PRIMARY KEY,
-
     group_id INTEGER NOT NULL,
-
     name VARCHAR(150) NOT NULL,
-
     type VARCHAR(50) NOT NULL DEFAULT 'savings',
-
     purchase_price NUMERIC(12,2) NOT NULL DEFAULT 0,
-
     current_value NUMERIC(12,2) NOT NULL DEFAULT 0,
-
     description TEXT,
-
     purchase_date DATE NOT NULL DEFAULT CURRENT_DATE,
-
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT fk_assets_group
         FOREIGN KEY (group_id)
         REFERENCES groups(id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     CONSTRAINT assets_type_valid
         CHECK (
@@ -67,29 +56,23 @@ CREATE TABLE IF NOT EXISTS assets (
         CHECK (TRIM(name) <> '')
 );
 
-
 -- ============================================================
 -- 2. ASSET VALUATIONS
--- Historical record of asset value changes
+-- Preserve asset valuation history.
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS asset_valuations (
     id SERIAL PRIMARY KEY,
-
     asset_id INTEGER NOT NULL,
-
     old_value NUMERIC(12,2) NOT NULL,
-
     new_value NUMERIC(12,2) NOT NULL,
-
     reason TEXT,
-
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT fk_asset_valuations_asset
         FOREIGN KEY (asset_id)
         REFERENCES assets(id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     CONSTRAINT asset_valuations_old_value_valid
         CHECK (old_value >= 0),
@@ -98,53 +81,34 @@ CREATE TABLE IF NOT EXISTS asset_valuations (
         CHECK (new_value >= 0)
 );
 
-
 -- ============================================================
 -- 3. OWNERSHIP UNITS
--- Core ownership record for MALI CHAMA
---
--- Example:
---
--- Asset NAV       = KSh 50,000
--- Total Units     = 500
--- Unit Price      = KSh 100
---
--- Member owns 25 units:
--- 25 / 500 = 5%
--- 25 × KSh 100 = KSh 2,500
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS ownership_units (
     id SERIAL PRIMARY KEY,
-
     group_id INTEGER NOT NULL,
-
     member_id INTEGER NOT NULL,
-
     asset_id INTEGER NOT NULL,
-
     contribution_id INTEGER,
-
     units NUMERIC(16,6) NOT NULL,
-
     unit_price_at_purchase NUMERIC(12,4) NOT NULL,
-
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT fk_ownership_group
         FOREIGN KEY (group_id)
         REFERENCES groups(id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     CONSTRAINT fk_ownership_member
         FOREIGN KEY (member_id)
         REFERENCES members(id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     CONSTRAINT fk_ownership_asset
         FOREIGN KEY (asset_id)
         REFERENCES assets(id)
-        ON DELETE CASCADE,
+        ON DELETE RESTRICT,
 
     CONSTRAINT fk_ownership_contribution
         FOREIGN KEY (contribution_id)
@@ -157,7 +121,6 @@ CREATE TABLE IF NOT EXISTS ownership_units (
     CONSTRAINT ownership_unit_price_positive
         CHECK (unit_price_at_purchase > 0)
 );
-
 
 -- ============================================================
 -- 4. INDEXES
@@ -187,21 +150,20 @@ CREATE INDEX IF NOT EXISTS idx_ownership_member
 CREATE INDEX IF NOT EXISTS idx_ownership_contribution
     ON ownership_units(contribution_id);
 
+-- Prevent a contribution from being allocated more than once.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ownership_contribution_once
+    ON ownership_units(contribution_id)
+    WHERE contribution_id IS NOT NULL;
 
 -- ============================================================
 -- 5. SAVINGS RESERVE
---
--- Create one Savings Reserve asset for every existing group.
---
--- We use a partial unique index so the seed is safely
--- repeatable without creating duplicate reserves.
+-- Create one reserve asset per existing group.
 -- ============================================================
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_assets_group_savings_reserve
     ON assets(group_id)
     WHERE type = 'savings'
       AND name = 'Chama Savings Reserve';
-
 
 INSERT INTO assets (
     group_id,
@@ -227,9 +189,7 @@ WHERE NOT EXISTS (
       AND a.name = 'Chama Savings Reserve'
 );
 
-
 COMMIT;
-
 
 -- ============================================================
 -- END OF MIGRATION
