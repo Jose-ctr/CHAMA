@@ -18,11 +18,11 @@ final class Database
             return self::$connection;
         }
 
-        $host = getenv('DB_HOST') ?: '127.0.0.1';
-        $port = getenv('DB_PORT') ?: '5432';
-        $database = getenv('DB_NAME') ?: 'chama';
-        $username = getenv('DB_USER') ?: 'postgres';
-        $password = getenv('DB_PASSWORD') ?: '';
+        $host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '127.0.0.1';
+        $port = $_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: '5432';
+        $database = $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?: 'chama';
+        $username = $_ENV['DB_USER'] ?? getenv('DB_USER') ?: 'postgres';
+        $password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD') ?: '';
 
         $dsn = sprintf(
             'pgsql:host=%s;port=%s;dbname=%s',

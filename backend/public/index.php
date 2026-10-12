@@ -13,7 +13,7 @@ use App\Services\OwnershipService;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-Bootstrap::init();
+Bootstrap::load();
 
 Cors::handle();
 

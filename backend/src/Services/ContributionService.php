@@ -31,12 +31,9 @@ class ContributionService
         }
 
         /*
-         * OwnershipService currently manages its own transaction.
-         * Therefore this service handles verification first and only
-         * commits after the ownership operation succeeds.
-         *
-         * When ownership allocation is requested, the ownership
-         * service must not be called inside this transaction.
+         * Verify the contribution and optionally allocate ownership
+         * inside one transaction. If allocation fails, roll back
+         * both operations.
          */
 
         $this->db->beginTransaction();
@@ -48,7 +45,7 @@ class ContributionService
                     group_id,
                     member_id,
                     amount,
-                    contribution_month,
+                    month AS contribution_month,
                     mpesa_code,
                     payment_method,
                     verification_status,
@@ -101,49 +98,33 @@ class ContributionService
             }
 
             /*
-             * If ownership allocation is requested, we need to perform
-             * the ownership operation outside this transaction because
-             * OwnershipService manages its own transaction.
-             *
-             * First commit the contribution verification.
+             * Verify the contribution and allocate ownership within
+             * the same transaction.
              */
             $stmt = $this->db->prepare("
                 UPDATE contributions
                 SET
                     verification_status = 'verified',
+                    verified = TRUE,
                     verified_at = NOW()
                 WHERE id = ?
             ");
 
             $stmt->execute([$contributionId]);
 
-            $this->db->commit();
-
-            /*
-             * Allocate ownership after successful verification.
-             */
             $ownership = null;
 
             if ($ownershipAmount !== null && $ownershipAmount > 0) {
-                try {
-                    $ownership = $this->ownershipService->allocateContribution(
-                        $groupId,
-                        $memberId,
-                        $contributionId,
-                        $ownershipAmount
-                    );
-                } catch (\Throwable $e) {
-                    /*
-                     * The ownership service failed after verification.
-                     *
-                     * Revert the contribution to pending so the financial
-                     * record does not remain falsely complete.
-                     */
-                    $this->revertVerification($contributionId);
-
-                    throw $e;
-                }
+                $ownership = $this->ownershipService->allocateContribution(
+                    $groupId,
+                    $memberId,
+                    $contributionId,
+                    $ownershipAmount
+                );
             }
+
+            // Commit only after verification and ownership both succeed.
+            $this->db->commit();
 
             return [
                 'contribution' => $contribution,
@@ -170,6 +151,7 @@ class ContributionService
             UPDATE contributions
             SET
                 verification_status = 'pending',
+                verified = FALSE,
                 verified_at = NULL
             WHERE id = ?
               AND verification_status = 'verified'
@@ -190,7 +172,7 @@ class ContributionService
                 group_id,
                 member_id,
                 amount,
-                contribution_month,
+                month AS contribution_month,
                 mpesa_code,
                 payment_method,
                 verification_status,
@@ -226,7 +208,7 @@ class ContributionService
                 m.name AS member_name,
                 m.phone AS member_phone,
                 c.amount,
-                c.contribution_month,
+                c.month AS contribution_month,
                 c.mpesa_code,
                 c.payment_method,
                 c.verification_status,
@@ -237,7 +219,7 @@ class ContributionService
                 ON m.id = c.member_id
             WHERE c.group_id = ?
             ORDER BY
-                c.contribution_month DESC,
+                c.month DESC,
                 c.created_at DESC
         ");
 
@@ -265,7 +247,7 @@ class ContributionService
                 group_id,
                 member_id,
                 amount,
-                contribution_month,
+                month AS contribution_month,
                 mpesa_code,
                 payment_method,
                 verification_status,
@@ -275,7 +257,7 @@ class ContributionService
             WHERE group_id = ?
               AND member_id = ?
             ORDER BY
-                contribution_month DESC,
+                month DESC,
                 created_at DESC
         ");
 

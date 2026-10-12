@@ -189,7 +189,10 @@ class OwnershipService
             );
         }
 
-        $this->db->beginTransaction();
+        $ownsTransaction = !$this->db->inTransaction();
+        if ($ownsTransaction) {
+            $this->db->beginTransaction();
+        }
 
         try {
             /*
@@ -397,7 +400,9 @@ class OwnershipService
             /*
              * 9. Commit the complete ownership operation.
              */
-            $this->db->commit();
+            if ($ownsTransaction) {
+                $this->db->commit();
+            }
 
             /*
              * 10. Return useful calculation information.
@@ -419,7 +424,7 @@ class OwnershipService
                 'unit_price_after' => $newUnitPrice
             ];
         } catch (\Throwable $e) {
-            if ($this->db->inTransaction()) {
+            if ($ownsTransaction && $this->db->inTransaction()) {
                 $this->db->rollBack();
             }
 
